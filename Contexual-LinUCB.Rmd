@@ -1,0 +1,253 @@
+---
+title: "Contextual Recommender System"
+output: 
+  html_notebook:
+    toc: true
+    toc_depth: 3
+bibliography: refs.bib
+---
+
+### Simulating Data
+
+Let's tart by simulating data:
+
+```{r, echo=TRUE, message=FALSE}
+library(dplyr)
+library(broom)
+library(MASS)
+library(ggplot2)
+library(purrr)
+library(tidyr)
+library(knitr)
+
+n <- 10000
+
+set.seed(7)
+
+bandit_data <- data_frame(
+  visited_american = sample(c(0,1), n, prob = c(0.6, 0.4), replace = T),
+  visited_chinese = sample(c(0,1), n, prob = c(0.7, 0.3), replace = T),
+  distance = sample(c(0,1), n, prob = c(0.5, 0.5), replace = T),
+  
+  arm = sample(c(1:3), n, replace =  T),
+  
+  american_coef = case_when(arm == 1 ~ .5,
+                          arm == 2 ~ .1,
+                          arm == 3 ~ .1),
+  chinese_coef = case_when(arm == 1 ~ .1,
+                            arm == 2 ~ .1,
+                            arm == 3 ~ .4),
+  
+  distance_coef = case_when(arm == 1 ~ .1,
+                          arm == 2 ~ .6,
+                          arm == 3 ~ .1),
+  
+  arm_baseline = case_when(arm == 1 ~ .1,
+                           arm == 2 ~ .2,
+                           arm == 3 ~ .1),
+  rand_draw = runif(n)
+) %>%
+  mutate(visit_factor = arm_baseline + american_coef * visited_american + chinese_coef * visited_chinese + distance_coef * distance) %>%
+  mutate(visit = ifelse(visit_factor >= rand_draw, 1, 0))
+```
+
+Let's check:
+
+```{r}
+bandit_data %>%
+  group_by(arm, visited_american, visited_chinese, distance) %>%
+  summarise(ct = n(), reward = sum(visit), mean_clk_rt = mean(visit)) %>%
+  group_by(visited_american, visited_chinese, distance) %>%
+  filter(mean_clk_rt == max(mean_clk_rt)) %>%
+  kable()
+
+```
+
+# The Algorithm
+
+On a high level, this is how the algorithm works: 
+- at each step, we run a linear regression with the data we have collected so far such that we have a coefficient for visited_american, visited_chinese, and distance. 
+- observe our new context, and generate a predicted payoff using our model. We also generate a confidence interval for that predicted payoff (i.e. visit rate) for each of the three arms. 
+- choose the arm with the highest upper confidence bound.
+
+### Definitions
+
+A few definitions are needed to be introduced:
+
+* $d$ is the number of features.
+
+* $m$ is the number of observations (in this case users) we have.
+
+* $\mathbf{D}_a$ is the $m \times d$ design matrix containing observations of our 3 variables for arm $a$. 
+
+* $\mathbf{c}_a$ is the vector of length $m$ for arm $a$ containing 1 if someone visited and 0 otherwise. 
+
+* $\hat{\boldsymbol\theta}_a$ is the vector of length 3 of coefficients we obtain from applying ridge regression to $\mathbf{D}_a$ and $\mathbf{c}_a$. The math for ridge regression is just like normal linear regression but with the ${\mathbf{I}_d}$ added:
+
+$$\hat{\boldsymbol\theta}_a = \underbrace{(\mathbf{D}_a ^\intercal \mathbf{D}_a + \mathbf{I}_d)^{-1}\mathbf{D}_a ^\intercal\mathbf{c}_a}_\text{ridge regression}$$
+
+* Following the authors and for convenience we will say that $\mathbf{A}_a = \mathbf{D}_a ^\intercal \mathbf{D}_a + \mathbf{I}_d$
+
+* $\mathbf{x}_{t,a}$ is a vector of length $d$ and is the context arm $a$ at time $t$. In other words, it is one observation of our three variables--or a single row of $\mathbf{D}_a$. So this could be the following or some other combination of 0 and 1:
+
+$$\begin{pmatrix}
+  1\\
+  0\\
+  1\\
+\end{pmatrix}$$
+
+* Lastly, the crux of this algorithm: the arm we choose at each time ($a_t$) is found by calculating which arm gives the largest predicted payoff from our ridge regression for our currently observed context (given by $\mathbf{x}_{t,a}^\intercal\hat{\boldsymbol\theta}_a$) plus $\alpha$ times the standard deviation of the expected payoff. The variance of the payoff is given by $\mathbf{x}_{t,a}^\intercal{\mathbf{A}_a}^{-1}\mathbf{x}_{t,a}$, so the standard deviation is just the square root of that:
+
+$$a_t = {argmax}_{a \in A_t} \Big( \underbrace{\mathbf{x}_{t,a}^\intercal\hat{\boldsymbol\theta}_a}_\text{predicted payoff} + {\alpha}\underbrace{\sqrt{\mathbf{x}_{t,a}^\intercal{\mathbf{A}_a}^{-1}\mathbf{x}_{t,a}}}_\text{standard deviation of payoff} \Big)$$
+
+* ${r_t}$ is the payoff (visited or didn't) we observe after we choose an arm in time $t$.
+
+* $\mathbf{b}_a$ is a vector of length $d$ that can be thought of as the $\mathbf{D}_a ^\intercal\mathbf{c}_a$ part of the ridge regression. We update it in every time period $t$ of the algorithm by by adding $r_t \mathbf{x}_{t,a_a}$ to it.
+
+LinUCB algorithm:
+
+1. Set $\alpha$
+2. Loop through every time period $t$ doing the following:
+    i. Observe the context ($\mathbf{x}_{t,a}$) and arms ($a_t$).
+    ii. Loop through each arm doing this:
+        1. If the arm hasn't been seen yet:
+            i. Instantiate $\mathbf{A}_a$ as a $d \times d$ identity matrix.
+            ii. Instantiate $\mathbf{b}_a$ as a 0 vector of length $d$.
+        2. Set $\hat{\boldsymbol\theta}_a = \mathbf{A}_a^{-1}\mathbf{b}_a$ (because remember that $\mathbf{A}_a$ is the first part of the ridge regression and $\mathbf{b}_a$ is the online variant of the second part).
+        3. Find the expected payoff $p_{t,a} = \mathbf{x}_{t,a}^\intercal\hat{\boldsymbol\theta}_a + {\alpha}\sqrt{\mathbf{x}_{t,a}^\intercal{\mathbf{A}_a}^{-1}\mathbf{x}_{t,a}}$
+    iii. End the arm loop.
+    iv. Choose the arm with the biggest $p_{t,a}$ (if there is a tie pick randomly among the winners).
+    v. Observe whether or not the user visited: $r_t$.
+    vi. Update $\mathbf{A}_{a_t}$ by adding $\mathbf{x}_{t,a_a} \mathbf{x}_{t,a_a}^{\intercal}$ to it.
+    vii. Update $\mathbf{b}_a$ by adding ${r_t} \mathbf{x}_{t,a_a}$ to it.
+15. End the time period loop.
+
+So really, this is pretty simple: in every time period, we find the upper end the confidence interval of the payoff for each arm, and we just pick the arm with the highest one!
+
+### Implementation in R
+
+First, we need to set a parameter $\alpha$ to control how much exploration should happen vs exploitation of the current best arm.
+```{r, echo=TRUE}
+alpha = 7
+```
+
+Help functions:
+
+```{r}
+library(MASS)
+
+# return the ucb estimates p_t_a 
+inside_for_func <- function(inverse_cov_matrix, reward_vector_times_design_matrix, context_vector, alpha){
+  theta_hat <- inverse_cov_matrix %*% reward_vector_times_design_matrix
+  ucb_estimate <- t(theta_hat) %*% context_vector + 
+    alpha * sqrt(t(context_vector) %*% inverse_cov_matrix %*% context_vector)
+  return(ucb_estimate)
+}
+
+# update the covariate matrix
+update_cov_matrix <- function(cov_matrix, context_vector){
+  return(cov_matrix + context_vector %*% t(context_vector))
+}
+
+# update b_a from above
+update_reward_vector_times_design_matrix <- function(reward_vector_times_design_matrix, reward, context_vector){
+  return(reward_vector_times_design_matrix + reward * context_vector)
+}
+
+```
+
+Let's instantiate some objects:
+
+```{r}
+arms <- c(1:3)
+d <- 3
+arm_choice <- c()
+cov_matrix <- list()
+reward_vector_times_design_matrix <- list() # this corresponds to b_a above
+ucb_estimate <- matrix(0, n, length(arms))
+```
+
+Let's run test it:
+
+```{r}
+for (t in 1:n){
+  context <- bandit_data[t,]
+  for (a in arms){
+    if(t == 1){
+      cov_matrix[[a]] <- diag(d)
+      reward_vector_times_design_matrix[[a]] <- rep(0, d)
+    }
+    inverse_cov_matrix <- ginv(cov_matrix[[a]])
+    ucb_estimate[t, a] <- inside_for_func(inverse_cov_matrix, 
+                    as.matrix(reward_vector_times_design_matrix[[a]]), 
+                    as.matrix(c(context$visited_american, context$visited_chinese, context$distance)), 
+                    alpha)
+  }
+  trial_arm <- which(ucb_estimate[t,] == max(ucb_estimate[t,]))
+  if(length(trial_arm) > 1){
+    trial_arm <- sample(trial_arm, 1)
+  }
+  if(trial_arm == context$arm){
+    arm_choice[t] <- trial_arm
+  }else{
+    arm_choice[t] <- t*10 # need to do this so I can filter out unused observations from bandit dataset
+    next
+  }
+  cov_matrix[[arm_choice[t]]] <- update_cov_matrix(cov_matrix[[arm_choice[t]]], 
+                                                as.matrix(c(context$visited_american, context$visited_chinese, context$distance)))
+  reward_vector_times_design_matrix[[arm_choice[t]]] <- update_reward_vector_times_design_matrix(
+    as.matrix(reward_vector_times_design_matrix[[arm_choice[t]]]),
+    context$visit,
+    as.matrix(c(context$visited_american, context$visited_chinese, context$distance))
+  )
+}
+
+```
+
+### Diagnostics
+
+Let's see what we get for our coefficients when we just run a linear regression for each arm on our initial full dataset and compare that to what the bandit calculated:
+
+```{r, echo = TRUE}
+bandit_data$arm_choice <- arm_choice
+
+# function to apply to the list columns of the bandit data
+lm_fun <- function(data){
+  return(tidy(summary(lm(visit ~ 0 + visited_american + visited_chinese + distance, data))))
+}
+
+# apply the lm function to each arm's data from the original dataset
+bandit_data %>%
+  nest(-arm) %>%
+  mutate(model = map(data, lm_fun)) %>%
+  unnest(model) %>%
+  dplyr::select(arm, term, data_estimate = estimate) %>%
+  arrange(arm) -> coefficients_from_data
+
+# calculate the coefficients for each of the arms using the bandit data
+map_df(arms, function(i) data_frame(arm = i, term = c("visited_american", "visited_chinese", "distance"), bandit_estimate = as.vector(ginv(cov_matrix[[i]]) %*% reward_vector_times_design_matrix[[i]]))) -> coefficients_from_bandit
+
+# join them together and see how different they are
+coefficients_from_data %>%
+  inner_join(coefficients_from_bandit, by = c("arm", "term")) %>%
+  mutate(percent_difference = 100*((bandit_estimate - data_estimate)/data_estimate)) -> estimate_data
+```
+
+```{r}
+kable(estimate_data)
+```
+Now let's see what the average reward was over time:
+
+```{r echo=TRUE}
+
+bandit_data %>%
+  filter(arm_choice < 10) %>%
+  group_by(visited_american, visited_chinese, distance, arm_choice) %>%
+  mutate(total_reward = cumsum(visit), trial = c(1:n())) %>%
+  mutate(avg_reward = total_reward/trial) %>%
+  ggplot(aes(x = trial, y = avg_reward, color = factor(arm), group = factor(arm))) +
+  geom_path() +
+  facet_wrap(~visited_chinese + visited_american + distance, scales = "free", labeller = "label_both")
+
+```
+
