@@ -1,9 +1,9 @@
 # City-scalable Destination Recommender System for On-Demand Senior Mobility
 
-**Principal Investigator: Joseph Chow *NYU*
+Principal Investigator: Joseph Chow *NYU*
 Co-principal Investigator: Kelvin Cheu *UTEP*
 Research Assistants: Assel Dmitriyeva *NYU*, Gyugeun Yoon *NYU*, Daniel Fay *Microsoft* 
-Research Area 1: Urban Mobility and Connected Citizens**
+Research Area 1: Urban Mobility and Connected Citizens
 
 This repository contains a prototype recommendation engine design for mobility systems to provide more reliable paratransit for elderly. 
 [Project page](http://c2smart.engineering.nyu.edu/2018/02/20/city-scalable-destination-recommender-system-for-on-demand-senior-mobility-new-2/).
