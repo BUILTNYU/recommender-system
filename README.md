@@ -12,6 +12,8 @@ This repository contains a prototype recommendation engine design for mobility s
 [Project page](http://c2smart.engineering.nyu.edu/2018/02/20/city-scalable-destination-recommender-system-for-on-demand-senior-mobility-new-2/).
 [Project report](http://c2smart.engineering.nyu.edu/wp-content/uploads/2019/01/C2SMART_Destination_Recommender_System_Report.pdf).
 
+# ![framework](https://github.com/BUILTNYU/recommender-system/blob/master/docs/framework.png)
+
 ## Acknowledgements
 Xuebo Lai helped with early development of the recommender system which is gratefully acknowledged. We would also like to thank David Sinclair, a student at NYU Wagner, for his help in conducting the elderly mobility survey in NYC. The survey research was conducted in collaboration with Professor Kelvin Cheu at the University of Texas at El Paso and his team there. Participation in the NSFRCN Workshop on Smart and Connected Communities and Aging Population at Stony Brook University on April 20, 2018 helped shed light on some recent senior surveys conducted nationwide, which is much appreciated. Funding and support is generously provided by [C2SMART](http://c2smart.engineering.nyu.edu/) Tier 1 USDOT University Transportation Center at NYU. 
 
