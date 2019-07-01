@@ -8,7 +8,7 @@
 
 ### Research Area 1: Urban Mobility and Connected Citizens
 
-This repository contains a prototype recommendation engine design for mobility systems to provide more reliable paratransit for elderly. Please refer to the [project report](http://c2smart.engineering.nyu.edu/wp-content/uploads/2019/01/C2SMART_Destination_Recommender_System_Report.pdf) for more infromation. 
+This repository contains a prototype recommendation engine design for mobility systems to provide more reliable paratransit for elderly. Please refer to the [project report](http://c2smart.engineering.nyu.edu/wp-content/uploads/2019/01/C2SMART_Destination_Recommender_System_Report.pdf) for more information. 
 
 # ![framework](https://github.com/BUILTNYU/recommender-system/blob/master/docs/framework.png)
 
